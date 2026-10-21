@@ -1,0 +1,133 @@
+// Prisma models mirroring the PostgreSQL tables created by sql/schema.sql (`npm run db:init`).
+// Field names stay snake_case so the JSON returned by the API is identical to the column names.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Aircraft {
+  id            BigInt   @id @default(autoincrement())
+  aircraft_name String   @db.VarChar(100)
+  created_at    DateTime @default(now()) @db.Timestamptz(6)
+
+  missions          Mission[]
+  telemetry         Telemetry[]
+  telemetry_batches TelemetryBatch[]
+  flight_logs       FlightLog[]
+
+  @@map("aircraft")
+}
+
+model Mission {
+  id           BigInt    @id @default(autoincrement())
+  aircraft_id  BigInt
+  mission_name String?   @db.VarChar(150)
+  status       String    @default("received") @db.VarChar(30)
+  mission_hash String    @db.VarChar(64)
+  item_count   Int?
+  status_at    DateTime? @db.Timestamptz(6)
+  created_at   DateTime  @default(now()) @db.Timestamptz(6)
+  started_at   DateTime? @db.Timestamptz(6)
+  completed_at DateTime? @db.Timestamptz(6)
+
+  aircraft          Aircraft         @relation(fields: [aircraft_id], references: [id])
+  waypoints         Waypoint[]
+  telemetry         Telemetry[]
+  telemetry_batches TelemetryBatch[]
+  flight_logs       FlightLog[]
+
+  // Duplicate prevention: the same mission content for the same aircraft is stored once.
+  @@unique([aircraft_id, mission_hash], map: "uq_missions_aircraft_hash")
+  @@map("missions")
+}
+
+model Waypoint {
+  id              BigInt   @id @default(autoincrement())
+  mission_id      BigInt
+  sequence_number Int
+  command         Int
+  frame           Int?
+  param1          Float?
+  param2          Float?
+  param3          Float?
+  param4          Float?
+  latitude        Float?
+  longitude       Float?
+  altitude        Float?
+  autocontinue    Boolean?
+  raw_item        Json?
+
+  mission Mission @relation(fields: [mission_id], references: [id], onDelete: Cascade)
+
+  @@unique([mission_id, sequence_number])
+  @@map("waypoints")
+}
+
+model TelemetryBatch {
+  batch_id     String   @id @db.Uuid
+  aircraft_id  BigInt
+  mission_id   BigInt?
+  flight_id    String?  @db.Uuid
+  record_count Int
+  received_at  DateTime @default(now()) @db.Timestamptz(6)
+
+  aircraft  Aircraft    @relation(fields: [aircraft_id], references: [id])
+  mission   Mission?    @relation(fields: [mission_id], references: [id])
+  telemetry Telemetry[]
+
+  @@map("telemetry_batches")
+}
+
+model Telemetry {
+  id                  BigInt   @id @default(autoincrement())
+  aircraft_id         BigInt
+  mission_id          BigInt?
+  flight_id           String?  @db.Uuid
+  batch_id            String?  @db.Uuid
+  timestamp           DateTime @db.Timestamptz(6)
+  message_type        String   @db.VarChar(60)
+  latitude            Float?
+  longitude           Float?
+  altitude_m          Float?
+  relative_altitude_m Float?
+  speed_mps           Float?
+  heading_deg         Float?
+  battery_voltage     Float?
+  raw_data            Json?
+
+  aircraft Aircraft        @relation(fields: [aircraft_id], references: [id])
+  mission  Mission?        @relation(fields: [mission_id], references: [id])
+  batch    TelemetryBatch? @relation(fields: [batch_id], references: [batch_id], onDelete: Cascade)
+
+  @@index([mission_id, timestamp], map: "idx_telemetry_mission_time")
+  @@index([aircraft_id, timestamp], map: "idx_telemetry_aircraft_time")
+  @@index([flight_id], map: "idx_telemetry_flight")
+  @@map("telemetry")
+}
+
+model FlightLog {
+  id              BigInt    @id @default(autoincrement())
+  aircraft_id     BigInt
+  mission_id      BigInt?
+  flight_id       String?   @db.Uuid
+  log_number      Int?
+  filename        String    @db.VarChar(255)
+  storage_path    String
+  file_size_bytes BigInt?
+  checksum_sha256 String    @db.VarChar(64)
+  status          String    @default("pending") @db.VarChar(30)
+  created_at      DateTime  @default(now()) @db.Timestamptz(6)
+  verified_at     DateTime? @db.Timestamptz(6)
+
+  aircraft Aircraft @relation(fields: [aircraft_id], references: [id])
+  mission  Mission? @relation(fields: [mission_id], references: [id])
+
+  // Duplicate prevention: identical log content for an aircraft is stored once.
+  @@unique([aircraft_id, checksum_sha256], map: "uq_flight_logs_aircraft_checksum")
+  @@index([mission_id], map: "idx_flight_logs_mission")
+  @@map("flight_logs")
+}
